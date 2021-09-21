@@ -1,3 +1,4 @@
+Нам необходимо,чтобы при обращении к Nginx, выдавал результат hello.go
 server {
 listen 80 default_server;
 location / {
