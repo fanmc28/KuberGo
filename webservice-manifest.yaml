@@ -1,4 +1,9 @@
-Для веб-приложения использовал простой Hello-World написанный на Go (hello.go) и сервер nginx
+Для веб-приложения использовал простой Hello-World написанный на Go (hello.go) и сервер nginx.
+Для доступа к веб-приложению используется Service  с типом loadbalancer
+Мультизональный отказоустойчивый кластер подразумевает, что на каждой зоне должен быть экземпляр сервиса.
+Допустим есть зоны А(2 ноды), Б(2 ноды) и В(1 нода), и в зоне В умирает нода, деплоймент должен развернуть новую ноду именно в зоне В. 
+За это отвечает PodAntiAffinity с параметром requiredDuringSchedulingIgnoredDuringExecution ("жестко" разнести оп узлам) 
+
 
 
 apiVersion: apps/v1
@@ -15,7 +20,17 @@ spec:
       name: nginx
       labels:
         appname: web
-    spec:
+  spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - web
+            topologyKey: "kubernetes.io/hostname"
       containers:
       - name: nginx              
         image: nginx:latest             установка nginx
@@ -24,7 +39,7 @@ spec:
           mountPath: /etc/nginx/conf.d/     вот по этому пути
       - name: site                        
         image: containous/site              запуск второго образа hello.go
-    volumes:
+      volumes:
       - name: config-nginx                  отсюда берет данные которые подключаются Mountpath
         configMap:
            name: nginx-config
