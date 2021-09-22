@@ -2,7 +2,9 @@
 Для доступа к веб-приложению используется Service  с типом loadbalancer
 Мультизональный отказоустойчивый кластер подразумевает, что на каждой зоне должен быть экземпляр сервиса.
 Допустим есть зоны А(2 ноды), Б(2 ноды) и В(1 нода), и в зоне В умирает нода, деплоймент должен развернуть новую ноду именно в зоне В. 
-За это отвечает PodAntiAffinity с параметром requiredDuringSchedulingIgnoredDuringExecution ("жестко" разнести по узлам) 
+За это отвечает PodAntiAffinity с параметром preferredDuringSchedulingIgnoredDuringExecution (более мягкое правило, в отличие от 
+requiredDuringSchedulingIgnoredDuringExecution, которое является обязательном правилом) 
+Для минимального потребления ресурсов, мы не будем увеличивать количество подов, а будем использовать verticalPodAutoscalers
 
 
 
@@ -15,22 +17,23 @@ spec:
   selector:
     matchLabels:
       appname: web       метка по которым будем следить за количеством реплик
-  template:              шаблон
+  template:              шаблон для создания реплик
     metadata:
       name: nginx
       labels:
         appname: web
   spec:
       affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
+        podAntiAffinity:             параметр антисходство
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+             preference:
               matchExpressions:
-              - key: app
-                operator: In
+              - key: appname         ключ-значение для метки                   
+                operator: In         метка должна находиться в узле
                 values:
-                - web
-            topologyKey: "kubernetes.io/hostname"
+                - web                метка на реплики
+    ###        topologyKey: "kubernetes.io/hostname"
       containers:
       - name: nginx              
         image: nginx:latest             установка nginx
@@ -38,7 +41,7 @@ spec:
         - name: config-nginx                подключение configmap
           mountPath: /etc/nginx/conf.d/     вот по этому пути
       - name: site                        
-        image: containous/site              запуск второго образа hello.go
+        image: github.com/fanmc28/KuberGo              запуск второго образа hello.go
       volumes:
       - name: config-nginx                  отсюда берет данные которые подключаются Mountpath
         configMap:
@@ -47,34 +50,47 @@ spec:
 apiVersion: v1
 kind: service
 metadata:
-  name: nginx-service
+  name: nginx-service                        service для доступа к веб-приложению из вне
 spec: 
   selector:
     appname: web
   ports:
       - protocol: TCP
-        port: 80 
-        targetPort: 80
-  type: loadBalancer      
+        port: 80                      при обращении на порт 80 сервиса мы попадем на appname: web 
+        targetPort: 80                на порт 80
+  type: loadBalancer                      IP адрес выдает cloudcontrollermanager
 
-apiVersion: autoscaling/v1
-kind: HorizontalPodAutoscaler
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
 metadata:
-  name: myservice
+  name: web-scaling                          увеличение ресурсов через VerticalPodAutoscaler
 spec:
-  scaleTargetRef:
+  targetRef:                              
     apiVersion: apps/v1
-    kind: Deployment
-    name: myservice
-  minReplicas: 3
-  maxReplicas: 5
-  targetCPUUtilizationPercentage: 70
-
-apiVersion: v1  
-kind: ResourceQuota  
+    kind:       Deployment
+    name:       myservice
+  updatePolicy:
+    updateMode: auto                    в режиме auto автоматически назначает запрошенные ресурсы и обновляет существующие
+  resourcePolicy:
+    containerPolicies:
+    - containerName: *
+      minAllowed:
+        cpu: 0.1
+        memory: 128Mi
+      maxAllowed:
+        cpu: 2
+        memory: 192Mi
+      
+apiVersion: v1                       выставим лимиты при создании pod
+kind: LimitRanges
 metadata:  
-  name: quota  
+  name: limit-web  
 spec:  
-  hard:
-    limits.cpu: "4"  
-    limits.memory: 1Gi
+  limits: 
+    - default:
+        memory: 192Mi                объем памяти,кот.будет ограничен для использования
+        cpu: 2                        объем цп, кот.будет ограничен для использования
+      defaultRequest:  
+        memory: 128Mi                объем памяти, кот.нужны контейнеру для использования
+        cpu: 0.1                    объем цп, кот.нужны контейнеру для использования              
+      type: Container
